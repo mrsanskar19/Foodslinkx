@@ -1,0 +1,157 @@
+import { NextRequest, NextResponse } from "next/server";
+import { connectDB } from "@/lib/db";
+import Hotel from "@/lib/models/Hotel";
+import { verifyToken, getAuthCookie } from "@/lib/auth";
+import User from "@/lib/models/User";
+
+// GET hotel details for verification
+export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const token = await getAuthCookie();
+    if (!token) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const payload = verifyToken(token);
+    if (!payload || payload.role !== 'admin') {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    await connectDB();
+    const hotel = await Hotel.findById(params.id);
+    if (!hotel) return NextResponse.json({ error: "Hotel not found" }, { status: 404 });
+
+    return NextResponse.json({ hotel });
+  } catch (error) {
+    return NextResponse.json({ error: "Failed to fetch hotel" }, { status: 500 });
+  }
+}
+
+// PATCH to update and verify hotel
+export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const token = await getAuthCookie();
+    if (!token) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const payload = verifyToken(token);
+    if (!payload || payload.role !== 'admin') {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const body = await req.json();
+    const { plan, planExpiry, maxTables, verified } = body;
+
+    // Calculate new planExpiry if plan is being changed
+    let updateData: any = { plan, planExpiry, maxTables, verified };
+    if (plan && !planExpiry) {
+      const now = new Date();
+      let expiryDate: Date;
+      switch (plan) {
+        case 'free':
+          expiryDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days
+          break;
+        case 'basic':
+          expiryDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days
+          break;
+        case 'premium':
+          expiryDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000); // 365 days
+          break;
+        default:
+          expiryDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // default 7 days
+      }
+      updateData.planExpiry = expiryDate;
+    }
+
+    await connectDB();
+    const updatedHotel = await Hotel.findByIdAndUpdate(
+      params.id,
+      updateData,
+      { new: true }
+    );
+
+    if (!updatedHotel) return NextResponse.json({ error: "Hotel not found" }, { status: 404 });
+
+    return NextResponse.json({ message: "Hotel verified successfully", hotel: updatedHotel });
+  } catch (error) {
+    return NextResponse.json({ error: "Failed to verify hotel" }, { status: 500 });
+  }
+}
+
+// PUT to update hotel data
+export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+  const session = await connectDB().startSession();
+  session.startTransaction();
+
+  try {
+    const token = await getAuthCookie();
+    if (!token) {
+      await session.abortTransaction();
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    const payload = verifyToken(token);
+    if (!payload || payload.role !== 'admin') {
+      await session.abortTransaction();
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const body = await req.json();
+    const { name, address, latitude, longitude, upiId } = body;
+
+    // Validation
+    const errors: Record<string, string> = {};
+    if (!name || name.trim().length < 2) errors.name = "Name must be at least 2 characters";
+    if (!address || address.trim().length < 5) errors.address = "Address must be at least 5 characters";
+    if (latitude !== undefined && (latitude < -90 || latitude > 90)) errors.latitude = "Invalid latitude";
+    if (longitude !== undefined && (longitude < -180 || longitude > 180)) errors.longitude = "Invalid longitude";
+    if (upiId && !upiId.includes('@')) errors.upiId = "Invalid UPI ID format";
+
+    if (Object.keys(errors).length > 0) {
+      await session.abortTransaction();
+      return NextResponse.json({ errors }, { status: 400 });
+    }
+
+    const updatedHotel = await Hotel.findByIdAndUpdate(
+      params.id,
+      { name: name.trim(), address: address.trim(), latitude, longitude, upiId: upiId?.trim() },
+      { new: true, session, runValidators: true }
+    );
+
+    if (!updatedHotel) {
+      await session.abortTransaction();
+      return NextResponse.json({ error: "Hotel not found" }, { status: 404 });
+    }
+
+    await session.commitTransaction();
+    return NextResponse.json({ message: "Hotel updated successfully", hotel: updatedHotel });
+  } catch (error: any) {
+    await session.abortTransaction();
+    console.error("Error updating hotel:", error);
+    if (error.code === 11000) {
+      return NextResponse.json({ error: "Duplicate entry" }, { status: 409 });
+    }
+    return NextResponse.json({ error: "Failed to update hotel" }, { status: 500 });
+  } finally {
+    session.endSession();
+  }
+}
+
+// DELETE to reject/delete a hotel
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const token = await getAuthCookie();
+    if (!token) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const payload = verifyToken(token);
+    if (!payload || payload.role !== 'admin') {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    await connectDB();
+    const deletedHotel = await Hotel.findByIdAndDelete(params.id);
+
+    if (!deletedHotel) return NextResponse.json({ error: "Hotel not found" }, { status: 404 });
+
+    return NextResponse.json({ message: "Hotel rejected and deleted successfully" });
+  } catch (error) {
+    return NextResponse.json({ error: "Failed to reject hotel" }, { status: 500 });
+  }
+}

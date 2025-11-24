@@ -1,0 +1,17 @@
+[
+  {
+    "id": "1760860643726",
+    "hotelId": "68f36557e8dd41dc90c26ced",
+    "deviceId": "device-s2m7rq86g1760860539761",
+    "items": [
+      {
+        "_id": "68f3b13c9a44c8a7fd46990b",
+        "name": "Test 1",
+        "price": 199,
+        "quantity": 2,
+        "customization": ""
+      }
+    ],
+    "createdAt": "2025-10-19T07:57:23.726Z"
+  }
+]

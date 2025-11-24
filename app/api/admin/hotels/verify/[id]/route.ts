@@ -1,0 +1,30 @@
+// app/api/admin/hotels/verify/[id]/route.ts
+import { connectDB } from "@/lib/db";
+import Hotel from "@/lib/models/Hotel";
+import { NextResponse } from "next/server";
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    await connectDB();
+    const hotel = await Hotel.findByIdAndUpdate(
+      params.id,
+      { verified: true },
+      { new: true }
+    );
+
+    if (!hotel) {
+      return NextResponse.json({ error: "Hotel not found" }, { status: 404 });
+    }
+
+    return NextResponse.json(hotel);
+  } catch (error) {
+    console.error("Error verifying hotel:", error);
+    return NextResponse.json(
+      { error: "Failed to verify hotel" },
+      { status: 500 }
+    );
+  }
+}
